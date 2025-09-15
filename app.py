@@ -3,7 +3,7 @@ import sqlite3
 
 app = Flask(__name__)
 
-# Database setup
+# database setup
 def init_db():
     conn = sqlite3.connect("studybuddy.db")
     cur = conn.cursor()
