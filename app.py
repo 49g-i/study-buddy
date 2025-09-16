@@ -1,17 +1,38 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import sqlite3
+import sys
+import os
+
+online_users = set()
+
+# ----------------- CONFIG -----------------
+DB_NAME = "studybuddy.db"
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
 
-# ----------------- DB INIT -----------------
-def init_db():
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
 
-    # Users table
+# ----------------- DB UTILITIES -----------------
+def get_db():
+    if "db" not in g:
+        g.db = sqlite3.connect(DB_NAME)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
+
+
+def init_db():
+    db = get_db()
+    cur = db.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,7 +42,6 @@ def init_db():
         )
     """)
 
-    # Messages table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,60 +52,52 @@ def init_db():
         )
     """)
 
-    conn.commit()
-    conn.close()
+    db.commit()
 
 
 # ----------------- DB HELPERS -----------------
 def save_user(name, email, subjects):
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO users (name, email, subjects) VALUES (?, ?, ?)",
-                (name, email, subjects))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    db.execute(
+        "INSERT OR IGNORE INTO users (name, email, subjects) VALUES (?, ?, ?)",
+        (name, email, subjects),
+    )
+    db.commit()
 
 
 def get_user_by_email(email):
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
-    cur.execute("SELECT name, email, subjects FROM users WHERE email = ?", (email,))
-    row = cur.fetchone()
-    conn.close()
-    return row
+    cur = get_db().execute(
+        "SELECT name, email, subjects FROM users WHERE email = ?", (email,)
+    )
+    return cur.fetchone()
 
 
 def get_all_users():
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
-    cur.execute("SELECT name, email, subjects FROM users")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+    cur = get_db().execute("SELECT name, email, subjects FROM users")
+    return cur.fetchall()
 
 
 def save_message(sender, receiver, content):
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
-    cur.execute("INSERT INTO messages (sender, receiver, content) VALUES (?, ?, ?)",
-                (sender, receiver, content))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    db.execute(
+        "INSERT INTO messages (sender, receiver, content) VALUES (?, ?, ?)",
+        (sender, receiver, content),
+    )
+    db.commit()
 
 
 def load_messages_between(user1, user2):
-    conn = sqlite3.connect("studybuddy.db")
-    cur = conn.cursor()
-    cur.execute("""
+    cur = get_db().execute(
+        """
         SELECT sender, receiver, content, timestamp
         FROM messages
         WHERE (sender = ? AND receiver = ?)
            OR (sender = ? AND receiver = ?)
         ORDER BY timestamp ASC
-    """, (user1, user2, user2, user1))
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+        """,
+        (user1, user2, user2, user1),
+    )
+    return cur.fetchall()
 
 
 # ----------------- ROUTES -----------------
@@ -99,19 +111,21 @@ def index():
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"]
+        name = request.form["name"].strip()
+        email = request.form["email"].strip().lower()
         subjects = ",".join(request.form.getlist("subjects"))
+
         save_user(name, email, subjects)
         session["email"] = email
         return redirect(url_for("dashboard"))
+
     return render_template("signup.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"]
+        email = request.form["email"].strip().lower()
         user = get_user_by_email(email)
         if user:
             session["email"] = email
@@ -129,6 +143,7 @@ def logout():
 def dashboard():
     if "email" not in session:
         return redirect(url_for("login"))
+
     users = get_all_users()
     return render_template("dashboard.html", users=users, me=session["email"])
 
@@ -137,9 +152,27 @@ def dashboard():
 def chat(other_email):
     if "email" not in session:
         return redirect(url_for("login"))
+
     me = session["email"]
     msgs = load_messages_between(me, other_email)
     return render_template("chat.html", messages=msgs, me=me, other=other_email)
+
+@app.route("/lobby")
+def lobby():
+    if "email" not in session:
+        return redirect(url_for("login"))
+    users = get_all_users()
+    # decorate each user with .online boolean
+    user_objs = []
+    for u in users:
+        user_objs.append({
+            "name": u[0],
+            "email": u[1],
+            "subjects": u[2].split(","),
+            "online": u[1] in online_users
+        })
+    return render_template("lobby.html", users=user_objs, me=session["email"])
+
 
 
 # ----------------- SOCKET EVENTS -----------------
@@ -157,21 +190,33 @@ def handle_message(data):
 
 @socketio.on("join")
 def on_join(data):
-    user = data["user"]
-    other = data["other"]
-    room = "_".join(sorted([user, other]))
-    join_room(room)
+    email = data.get("email")
+    if email:
+        online_users.add(email)
+        # broadcast updated list
+        emit("user_list", {"users": list(online_users)}, broadcast=True)
 
+@socketio.on("disconnect")
+def on_disconnect():
+    # try to remove user on disconnect
+    email = session.get("email")
+    if email in online_users:
+        online_users.remove(email)
+        emit("user_list", {"users": list(online_users)}, broadcast=True)
 
-@socketio.on("leave")
-def on_leave(data):
-    user = data["user"]
-    other = data["other"]
-    room = "_".join(sorted([user, other]))
-    leave_room(room)
 
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
-    init_db()
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    if not os.path.exists(DB_NAME):
+        with app.app_context():
+            init_db()
+
+    port = 5000
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            pass
+
+    socketio.run(app, host="127.0.0.1", port=port, debug=True)
