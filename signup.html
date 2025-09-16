@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Signup - StudyBuddy</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="box">
+    <h2>Signup / Login</h2>
+    <form method="post" action="{{ url_for('signup') }}">
+      <label>Name</label><br>
+      <input name="name" required><br><br>
+      <label>Email</label><br>
+      <input name="email" type="email" required><br><br>
+      <label>Subjects</label><br>
+      <input type="checkbox" name="subjects" value="CSE"> CSE<br>
+      <input type="checkbox" name="subjects" value="Mathematics"> Mathematics<br>
+      <input type="checkbox" name="subjects" value="Physics"> Physics<br>
+      <input type="checkbox" name="subjects" value="English"> English<br><br>
+      <button class="btn" type="submit">Enter Lobby</button>
+    </form>
+    <hr>
+    <form method="post" action="{{ url_for('login') }}">
+      <label>Login with Email</label><br>
+      <input name="email" type="email"><br>
+      <button class="btn">Login</button>
+    </form>
+  </div>
+</body>
+</html>
