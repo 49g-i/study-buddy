@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>All Users</h2>
+<ul class="list-group">
+  {% for u in users %}
+    <li class="list-group-item">
+      <b>{{ u['name'] }}</b> ({{ u['email'] }}) <br>
+      Subjects: {{ u['subjects'] }}
+      {% if u['email'] != me %}
+        <a href="{{ url_for('chat', other=u['email']) }}" class="btn btn-sm btn-outline-primary float-end">Chat</a>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% endblock %}
