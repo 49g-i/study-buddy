@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Chat with {{ other }}</h2>
+<div id="chat-box" class="border p-2 mb-3" style="height:300px; overflow-y:scroll;">
+  {% for msg in messages %}
+    <div><b>{{ msg['sender'] }}:</b> {{ msg['content'] }}</div>
+  {% endfor %}
+</div>
+
+<form id="chat-form">
+  <input type="text" id="message" class="form-control" placeholder="Type a message...">
+  <button class="btn btn-success mt-2">Send</button>
+</form>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+  var socket = io();
+  var me = "{{ me }}";
+  var other = "{{ other }}";
+  var room = [me, other].sort().join("_");
+
+  socket.emit("join", { email: me });
+  socket.emit("join", { room: room });
+
+  document.getElementById("chat-form").onsubmit = function(e) {
+    e.preventDefault();
+    var msg = document.getElementById("message").value;
+    socket.emit("send_message", { sender: me, receiver: other, content: msg });
+    document.getElementById("message").value = "";
+  };
+
+  socket.on("receive_message", function(data) {
+    var box = document.getElementById("chat-box");
+    var div = document.createElement("div");
+    div.innerHTML = "<b>" + data.sender + ":</b> " + data.content;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  });
+</script>
+{% endblock %}
