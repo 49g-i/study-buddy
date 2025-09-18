@@ -1,14 +1,14 @@
 from flask import Flask, render_template, request, redirect, url_for, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import sqlite3
-import sys
 import os
+import sys
 
+# Track online users
 online_users = set()
 
 # ----------------- CONFIG -----------------
 DB_NAME = "studybuddy.db"
-
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
@@ -33,6 +33,7 @@ def init_db():
     db = get_db()
     cur = db.cursor()
 
+    # Users
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +43,7 @@ def init_db():
         )
     """)
 
+    # Messages
     cur.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,34 +150,33 @@ def dashboard():
     return render_template("dashboard.html", users=users, me=session["email"])
 
 
-@app.route("/chat/<other_email>")
-def chat(other_email):
+@app.route("/chat/<other>")
+def chat(other):
     if "email" not in session:
         return redirect(url_for("login"))
 
     me = session["email"]
-    msgs = load_messages_between(me, other_email)
-    return render_template("chat.html", messages=msgs, me=me, other=other_email)
-
-@app.route("/lobby")
-def lobby():
-    if "email" not in session:
-        return redirect(url_for("login"))
-    users = get_all_users()
-    # decorate each user with .online boolean
-    user_objs = []
-    for u in users:
-        user_objs.append({
-            "name": u[0],
-            "email": u[1],
-            "subjects": u[2].split(","),
-            "online": u[1] in online_users
-        })
-    return render_template("lobby.html", users=user_objs, me=session["email"])
-
+    messages = load_messages_between(me, other)
+    return render_template("chat.html", me=me, other=other, messages=messages)
 
 
 # ----------------- SOCKET EVENTS -----------------
+@socketio.on("join")
+def on_join(data):
+    email = data.get("email")
+    if email:
+        online_users.add(email)
+        emit("user_list", {"users": list(online_users)}, broadcast=True)
+
+
+@socketio.on("disconnect")
+def on_disconnect():
+    email = session.get("email")
+    if email in online_users:
+        online_users.remove(email)
+        emit("user_list", {"users": list(online_users)}, broadcast=True)
+
+
 @socketio.on("send_message")
 def handle_message(data):
     sender = data["sender"]
@@ -186,24 +187,6 @@ def handle_message(data):
 
     room = "_".join(sorted([sender, receiver]))
     emit("receive_message", {"sender": sender, "content": content}, room=room)
-
-
-@socketio.on("join")
-def on_join(data):
-    email = data.get("email")
-    if email:
-        online_users.add(email)
-        # broadcast updated list
-        emit("user_list", {"users": list(online_users)}, broadcast=True)
-
-@socketio.on("disconnect")
-def on_disconnect():
-    # try to remove user on disconnect
-    email = session.get("email")
-    if email in online_users:
-        online_users.remove(email)
-        emit("user_list", {"users": list(online_users)}, broadcast=True)
-
 
 
 # ----------------- MAIN -----------------
