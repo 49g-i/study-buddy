@@ -1,15 +1,8 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>StudyBuddy Finder</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <div class="box">
-    <h1>StudyBuddy Finder</h1>
-    <p>Find classmates online and chat in real time.</p>
-    <a class="btn" href="{{ url_for('signup') }}">Signup / Login</a>
+{% extends "base.html" %}
+{% block content %}
+  <div class="text-center">
+    <h1>Welcome to StudyBuddy!</h1>
+    <a href="{{ url_for('signup') }}" class="btn btn-primary m-2">Sign Up</a>
+    <a href="{{ url_for('login') }}" class="btn btn-secondary m-2">Log In</a>
   </div>
-</body>
-</html>
+{% endblock %}
