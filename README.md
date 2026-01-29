@@ -1,2 +1,2 @@
 # study-buddy
-still in dev mode.
+abandoned.
